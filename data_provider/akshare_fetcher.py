@@ -64,7 +64,11 @@ logger = logging.getLogger(__name__)
 SINA_REALTIME_ENDPOINT = "hq.sinajs.cn/list"
 TENCENT_REALTIME_ENDPOINT = "qt.gtimg.cn/q"
 _AKSHARE_HISTORY_CALL_TIMEOUT = 30.0
-_AKSHARE_MARKET_STATS_CALL_TIMEOUT = 30.0
+# 本地改动（fork）：上游默认 30s。GitHub Actions 境外 runner 访问新浪全市场快照
+# (ak.stock_zh_a_spot) 稳定超过 30s 而被判定超时，导致大盘复盘的「市场宽度/成交额」
+# 常年为空。放宽到 90s 用于验证究竟是「慢」还是「不通」。
+# 若验证无效可安全还原为 30.0。
+_AKSHARE_MARKET_STATS_CALL_TIMEOUT = 90.0
 _AKSHARE_TIMEOUT_PROCESS_JOIN_GRACE = 1.0
 _AKSHARE_TIMEOUT_PROCESS_START_METHOD = "spawn"
 
