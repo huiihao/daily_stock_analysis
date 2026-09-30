@@ -1,0 +1,113 @@
+# 生成 A 股「个股 → 东财行业板块」静态映射文件
+#
+# 为什么在 Actions 里跑，而不是在本地：
+#   东财的 clist/get 端点对高频访问会做持久封禁（实测本机被拒 3 小时以上未解）。
+#   GitHub 的 runner 每次都是全新 IP，不继承本地的封禁记录。
+#
+# 为什么要固化成静态文件：
+#   东财行业板块约 500 个，成分股需近 500 次请求，且受 1.3 秒强制间隔与熔断限制。
+#   每日分析任务重拉必挂；行业归属月级才变，所以生成一次、每天读文件即可。
+#
+# 用法：
+#   Actions → 生成行业映射 → Run workflow
+#   首次或想刷新时手动触发即可。被限流中断也没关系 —— 脚本每爬完一个板块就落盘，
+#   进度会随本工作流提交回仓库，下次触发自动续爬。
+name: 生成行业映射
+
+on:
+  workflow_dispatch:
+    inputs:
+      sleep_seconds:
+        description: '每个板块之间的间隔秒数（被限流就调大）'
+        required: false
+        default: '6'
+      reset:
+        description: '丢弃已有进度，从头开始爬'
+        required: false
+        type: boolean
+        default: false
+
+# 需要 contents: write 才能把生成结果提交回仓库
+permissions:
+  contents: write
+
+concurrency:
+  group: build-industry-map
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    # 约 500 个板块 × 间隔，正常运行 40-60 分钟；留足余量
+    timeout-minutes: 180
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v5
+
+      - name: 设置 Python 环境
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: 安装依赖
+        run: |
+          pip install --upgrade pip
+          pip install akshare pandas requests
+
+      - name: 显示已有进度
+        run: |
+          if [ -f data/industry_map.partial.json ]; then
+            COUNT=$(python -c "import json;print(len(json.load(open('data/industry_map.partial.json',encoding='utf-8')).get('boards',{})))" 2>/dev/null || echo '?')
+            echo "📦 已有进度：$COUNT 个板块（将自动续爬）"
+          else
+            echo "📦 无历史进度，从头开始"
+          fi
+
+      - name: 生成行业映射
+        id: build
+        continue-on-error: true
+        run: |
+          python scripts/build_industry_map.py \
+            --sleep "${{ inputs.sleep_seconds }}" \
+            ${{ inputs.reset && '--reset' || '' }}
+
+      # 无论成功失败都提交 —— 失败时提交的是断点进度，下次触发可续爬
+      - name: 提交结果回仓库
+        if: always()
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add -A data/ 2>/dev/null || true
+          if git diff --cached --quiet; then
+            echo "本次无文件变更"
+          else
+            git commit -m "chore(data): 更新行业映射 [skip ci]"
+            git push
+            echo "✅ 已提交回仓库"
+          fi
+
+      - name: 汇总
+        if: always()
+        run: |
+          echo "======== 生成结果 ========"
+          if [ -f data/industry_map.json ]; then
+            python -c "import json;d=json.load(open('data/industry_map.json',encoding='utf-8'));print(f\"完成: {d['board_count']} 个板块 / {d['stock_count']} 只股票\");print('生成时间:',d['generated_at']);f=d.get('failed_boards') or [];print(f'失败板块 {len(f)} 个:',', '.join(f[:10])) if f else print('无失败板块')"
+          else
+            echo "尚未生成 industry_map.json（可能中途被限流）"
+            if [ -f data/industry_map.partial.json ]; then
+              python -c "import json;print('已保留断点进度:',len(json.load(open('data/industry_map.partial.json',encoding='utf-8')).get('boards',{})),'个板块，下次触发自动续爬')"
+            else
+              echo "无断点进度"
+            fi
+          fi
+
+      - name: 上传产物
+        if: always()
+        uses: actions/upload-artifact@v6
+        with:
+          name: industry-map-${{ github.run_number }}
+          path: data/industry_map*.json
+          if-no-files-found: warn
+          retention-days: 30
