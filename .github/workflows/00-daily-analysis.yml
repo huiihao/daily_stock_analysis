@@ -64,7 +64,23 @@ jobs:
       - name: 创建必要目录
         run: |
           mkdir -p data logs reports
-      
+
+      # 本地改动（fork）：行业冷暖榜。
+      # 放在个股分析之前跑，让榜单与分析结论在同一轮推送里送达。
+      # 纯量化、不调用 LLM：读仓库里的行业映射（零外部请求）+ 一次全市场快照。
+      # continue-on-error 是刻意的 —— 快照源不稳定时不应连累个股分析主流程。
+      - name: 生成行业冷暖榜
+        continue-on-error: true
+        run: |
+          echo "======== 行业冷暖榜 ========"
+          if [ ! -f data/industry_map.json ]; then
+            echo "⚠️ 缺少 data/industry_map.json，跳过冷暖榜"
+            echo "   （运行「生成行业映射」工作流可重新生成）"
+            exit 0
+          fi
+          # 榜单会自行推送到已配置的通知渠道
+          python scripts/industry_radar.py --level sw2 --top-n 10 --select-count 50
+
       - name: 执行股票分析
         env:
           # ==========================================
