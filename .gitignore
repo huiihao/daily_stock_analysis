@@ -89,3 +89,6 @@ static/
 /apps/dsa-desktop/node_modules/
 /node_modules/
 docs/specs/
+
+# 行业映射为每日任务所需的静态数据，必须纳入版本控制（其余 data/ 内容仍忽略）
+!data/industry_map.json
