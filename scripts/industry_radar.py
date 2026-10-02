@@ -25,6 +25,13 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+# 以 `python scripts/industry_radar.py` 运行时，sys.path[0] 是 scripts/ 而非仓库根，
+# 会导致 `from src.notification_sender import ...` 失败（表现为推送被静默跳过）。
+# 显式把仓库根加进搜索路径。
+_REPO_ROOT = Path(__file__).resolve().parent.parent
+if str(_REPO_ROOT) not in sys.path:
+    sys.path.insert(0, str(_REPO_ROOT))
+
 sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8", errors="replace")
 
 # ---- 多因子权重（总和应为 1.0，脚本会归一化）----
@@ -356,30 +363,38 @@ def format_full_html(boards: list[dict[str, Any]], level: str) -> str:
 # 推送
 # --------------------------------------------------------------------------- #
 
-def push(content: str, dry_run: bool) -> None:
-    if dry_run:
-        log("--dry-run：跳过推送")
-        return
+def push(content: str, dry_run: bool) -> bool:
+    """推送到已配置的渠道。返回是否全部成功。
+
+    配置加载放在 dry_run 判断之前 —— 这样 --dry-run 也能验证导入链路是否正常，
+    否则 sys.path 之类的导入问题会在 dry-run 里被掩盖，只在真实运行时才暴露。
+    """
     try:
         from src.config import setup_env, get_config
         setup_env()
         config = get_config()
     except Exception as exc:  # noqa: BLE001
-        log(f"加载配置失败，跳过推送: {exc}")
-        return
+        log(f"❌ 加载配置失败: {type(exc).__name__}: {exc}")
+        return False
+
+    if dry_run:
+        log("--dry-run：配置加载正常，跳过实际推送")
+        return True
 
     from src.notification_sender import WechatSender, FeishuSender
 
+    all_ok = True
     for label, sender in (("企业微信", WechatSender), ("飞书", FeishuSender)):
         try:
             inst = sender(config)
-            if sender is WechatSender:
-                ok = inst.send_to_wechat(content)
-            else:
-                ok = inst.send_to_feishu(content)
-            log(f"  {label}: {'✅ 发送成功' if ok else '⚪ 跳过（未配置）'}")
+            ok = (inst.send_to_wechat(content) if sender is WechatSender
+                  else inst.send_to_feishu(content))
+            log(f"  {label}: {'✅ 发送成功' if ok else '⚪ 跳过（未配置 webhook）'}")
+            # 未配置不算失败，真正抛异常才算
         except Exception as exc:  # noqa: BLE001
             log(f"  {label}: ❌ {type(exc).__name__}: {exc}")
+            all_ok = False
+    return all_ok
 
 
 def main() -> int:
@@ -431,12 +446,14 @@ def main() -> int:
     log(f"精选 {len(picked)} 只 -> {outdir}/selected_stocks.txt")
 
     log("推送 ...")
-    push(digest, args.dry_run)
+    push_ok = push(digest, args.dry_run)
+    if not push_ok:
+        log("⚠️ 推送未全部成功 —— 榜单文件仍已写入 reports/，会随 artifact 上传")
 
     print("\n" + "=" * 62)
     print(digest[:1600])
     print("=" * 62)
-    return 0
+    return 0 if push_ok else 1
 
 
 if __name__ == "__main__":
