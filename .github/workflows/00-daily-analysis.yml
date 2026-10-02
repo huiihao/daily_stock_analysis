@@ -71,6 +71,15 @@ jobs:
       # continue-on-error 是刻意的 —— 快照源不稳定时不应连累个股分析主流程。
       - name: 生成行业冷暖榜
         continue-on-error: true
+        # 这些密钥在「执行股票分析」步骤里是 step 级 env，作用域不跨步骤，
+        # 所以这里必须重新声明一遍，否则脚本读不到 webhook 会静默跳过推送。
+        env:
+          WECHAT_WEBHOOK_URL: ${{ secrets.WECHAT_WEBHOOK_URL }}
+          WECHAT_MSG_TYPE: ${{ vars.WECHAT_MSG_TYPE || secrets.WECHAT_MSG_TYPE || 'markdown' }}
+          FEISHU_WEBHOOK_URL: ${{ secrets.FEISHU_WEBHOOK_URL }}
+          FEISHU_WEBHOOK_SECRET: ${{ secrets.FEISHU_WEBHOOK_SECRET }}
+          FEISHU_WEBHOOK_KEYWORD: ${{ vars.FEISHU_WEBHOOK_KEYWORD || secrets.FEISHU_WEBHOOK_KEYWORD }}
+          WEBHOOK_VERIFY_SSL: ${{ vars.WEBHOOK_VERIFY_SSL || secrets.WEBHOOK_VERIFY_SSL || 'true' }}
         run: |
           echo "======== 行业冷暖榜 ========"
           if [ ! -f data/industry_map.json ]; then
