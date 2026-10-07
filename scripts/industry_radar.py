@@ -51,6 +51,19 @@ def log(msg: str) -> None:
     print(f"[{datetime.now().strftime('%H:%M:%S')}] {msg}", flush=True)
 
 
+def _cn_market_open() -> bool | None:
+    """A 股今天是否开市。无法判断时返回 None（调用方应按"照常运行"处理）。
+
+    复用仓库自带的交易日历，与 main.py 的个股过滤同源，避免两套判断口径打架。
+    """
+    try:
+        from src.core.trading_calendar import get_open_markets_today
+        return "cn" in get_open_markets_today()
+    except Exception as exc:  # noqa: BLE001
+        log(f"  交易日判断不可用（{type(exc).__name__}），按开市处理")
+        return None
+
+
 def _num(value: Any) -> float | None:
     try:
         if value is None or value == "":
@@ -406,7 +419,17 @@ def main() -> int:
                    help="输出给 LLM 深度分析的股票数")
     p.add_argument("--outdir", default="reports")
     p.add_argument("--dry-run", action="store_true")
+    p.add_argument("--force-run", action="store_true",
+                   help="跳过交易日检查（休市日也生成榜单）")
     args = p.parse_args()
+
+    # 休市日不出榜单：快照数据仍是上一交易日的，推出去就是一份重复内容。
+    # 个股分析的交易日检查在 main.py 内部，冷暖榜是独立步骤，必须自己判断。
+    if not args.force_run:
+        is_open = _cn_market_open()
+        if is_open is False:
+            log("A 股今日休市，跳过冷暖榜（用 --force-run 可强制生成）")
+            return 0
 
     map_path = Path(args.map)
     industry_map = load_industry_map(map_path)
