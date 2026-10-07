@@ -87,8 +87,13 @@ jobs:
             echo "   （运行「生成行业映射」工作流可重新生成）"
             exit 0
           fi
-          # 榜单会自行推送到已配置的通知渠道
-          python scripts/industry_radar.py --level sw2 --top-n 10 --select-count 50
+          # 手动选择 force_run 时同样跳过交易日检查（与个股分析行为一致）
+          FORCE_ARG=""
+          if [ "${{ github.event.inputs.force_run }}" = "true" ]; then
+            FORCE_ARG="--force-run"
+          fi
+          # 榜单会自行推送到已配置的通知渠道；休市日脚本会自行跳过
+          python scripts/industry_radar.py --level sw2 --top-n 10 --select-count 50 $FORCE_ARG
 
       - name: 执行股票分析
         env:
