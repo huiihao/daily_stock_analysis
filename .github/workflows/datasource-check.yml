@@ -1,0 +1,54 @@
+# 数据源体检：在 GitHub runner 上验证 BaoStock 是否可用
+#
+# 背景：本环境的主力数据源多为网页爬虫（AKShare/东财），境外 IP 上经常被封。
+# BaoStock 是免登录免积分的协议级客户端，稳定性本质上不同 —— 但需要确认
+# 它在境外 IP 上是否同样可用。
+#
+# 用法：Actions → 数据源体检 → Run workflow
+name: 数据源体检
+
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: '要体检的数据源'
+        required: false
+        default: 'baostock'
+        type: choice
+        options:
+          - baostock
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v5
+
+      - name: 设置 Python 环境
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.11'
+
+      - name: 安装依赖
+        run: |
+          pip install --upgrade pip
+          pip install baostock
+
+      - name: 运行体检
+        run: |
+          python scripts/check_baostock.py
+
+      - name: 写入 job summary
+        if: always()
+        run: |
+          echo "### 数据源体检结果" >> "$GITHUB_STEP_SUMMARY"
+          echo "" >> "$GITHUB_STEP_SUMMARY"
+          echo "详见上方步骤日志。重点看：" >> "$GITHUB_STEP_SUMMARY"
+          echo "- 登录是否成功（境外 IP 是否被拒）" >> "$GITHUB_STEP_SUMMARY"
+          echo "- 日K 查询耗时与行长（能否作日K主源）" >> "$GITHUB_STEP_SUMMARY"
+          echo "- \`query_stock_industry\` 是否返回全市场行业（能否替代 2 小时爬取）" >> "$GITHUB_STEP_SUMMARY"
